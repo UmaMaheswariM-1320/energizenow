@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EnergizeNow Expense</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--brand:#0f9d58;--brand-d:#0b7a44;--ink:#10231a;--mute:#6b7a72;--line:#e3e9e5}
+body{background:#f4f7f5;font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:var(--ink)}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:20px}
+.in{border:1px solid #cfd8d3;border-radius:8px;padding:8px 12px;width:100%;background:#fff}
+.in:focus,.btn:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.btn{background:var(--brand);color:#fff;border-radius:8px;padding:8px 16px;font-weight:600;font-size:14px}
+.btn:hover{background:var(--brand-d)}
+.btn2{border:1px solid #cfd8d3;border-radius:8px;padding:5px 12px;font-size:13px;font-weight:500;background:#fff}
+.btn2:hover{background:#f0f5f2}
+.pill{padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600;white-space:nowrap}
+.nav{display:flex;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;font-size:14px;font-weight:600;color:#44564c;width:100%;text-align:left}
+.nav:hover{background:#eef4f0}.nav.on{background:#e3f5ea;color:var(--brand-d)}
+th{text-align:left;color:var(--mute);font-weight:600;font-size:13px;padding:8px 6px}td{padding:10px 6px;border-top:1px solid var(--line);font-size:14px}
+</style></head>
+<body><div id="app"></div>
+<script>
+const fmt=n=>'₹'+Number(n||0).toLocaleString('en-IN'),$=s=>document.querySelector(s);
+let U=JSON.parse(localStorage.u||'null'),T=localStorage.t,page='dashboard',charts=[];
+const COL={draft:'bg-slate-100 text-slate-700',submitted:'bg-blue-100 text-blue-700',manager_approved:'bg-amber-100 text-amber-800',approved:'bg-emerald-100 text-emerald-700',rejected:'bg-red-100 text-red-700',reimbursed:'bg-violet-100 text-violet-700'};
+const pill=s=>`<span class="pill ${COL[s]||''}">${s.replace('_',' ')}</span>`;
+const empty=t=>`<p class="text-center py-8" style="color:var(--mute)">${t}</p>`;
+async function api(url,o={}){
+  const h={Authorization:'Bearer '+T};
+  if(o.body&&!(o.body instanceof FormData)){h['Content-Type']='application/json';o.body=JSON.stringify(o.body)}
+  const r=await fetch('/api'+url,{...o,headers:h}),d=await r.json();
+  if(r.status===401&&T){logout();throw d}
+  if(!r.ok){alert(d.message||'Something went wrong');throw d}
+  return d}
+function logout(){localStorage.clear();U=T=null;render()}
+const fd=f=>Object.fromEntries(new FormData(f));
+
+function render(){
+  charts.forEach(c=>c.destroy());charts=[];
+  if(!U)return login();
+  const r=U.role,menu=[['dashboard','Dashboard','◧'],['expenses','Expenses','₹'],['reports','Reports','▤']];
+  if(r!=='employee')menu.push(['approvals',r==='manager'?'Approvals':'Approvals & payments','✓']);
+  if(r==='admin')menu.push(['admin','Admin','⚙']);
+  $('#app').innerHTML=`<div class="flex min-h-screen">
+  <aside class="w-60 bg-white border-r p-4 flex-col hidden md:flex" style="border-color:var(--line)">
+    <div class="text-xl font-extrabold mb-8 px-2" style="color:var(--brand-d)">⚡ EnergizeNow<div class="text-xs font-medium" style="color:var(--mute)">Expense</div></div>
+    <nav class="space-y-1 flex-1">${menu.map(m=>`<button class="nav ${page===m[0]?'on':''}" onclick="go('${m[0]}')"><span class="w-5 text-center">${m[2]}</span>${m[1]}</button>`).join('')}</nav>
+    <button class="nav" onclick="logout()">Sign out</button></aside>
+  <main class="flex-1 min-w-0">
+    <header class="bg-white border-b px-6 py-3 flex items-center justify-between" style="border-color:var(--line)">
+      <div class="md:hidden flex gap-1 overflow-x-auto">${menu.map(m=>`<button class="btn2" onclick="go('${m[0]}')">${m[1]}</button>`).join('')}</div>
+      <div class="hidden md:block"></div>
+      <div class="flex items-center gap-4 relative"><button onclick="bell()" class="relative text-xl" aria-label="Notifications">🔔<span id="dot" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-red-500"></span></button>
+        <div id="nlist" class="hidden absolute right-0 top-9 w-80 card shadow-lg z-10 max-h-80 overflow-auto"></div>
+        <div class="text-sm"><b>${U.name}</b> <span class="pill bg-slate-100 text-slate-600">${r}</span></div></div></header>
+    <div id="view" class="p-6 max-w-6xl"></div></main></div>`;
+  ({dashboard,expenses,reports,approvals,admin})[page]();checkBell()}
+function go(p){page=p;render()}
+
+function login(){
+  $('#app').innerHTML=`<div class="min-h-screen grid md:grid-cols-2">
+  <div class="hidden md:flex flex-col justify-center p-16 text-white" style="background:linear-gradient(160deg,#0b7a44,#0f9d58)">
+    <div class="text-4xl font-extrabold leading-tight">Every rupee spent,<br>accounted for.</div>
+    <p class="mt-4 text-lg opacity-90 max-w-md">Capture expenses, send reports for approval, and track reimbursements for EnergizeNow in one place.</p></div>
+  <div class="flex items-center justify-center p-6"><form id="lf" class="card w-full max-w-sm">
+    <h1 class="text-2xl font-extrabold">Sign in</h1><p class="text-sm mb-5" style="color:var(--mute)">Use your EnergizeNow account</p>
+    <input class="in mb-3" name="email" placeholder="Email" value="ravi@energizenow.com" required>
+    <input class="in mb-4" name="password" type="password" placeholder="Password" value="Energize@123" required>
+    <button class="btn w-full">Sign in</button>
+    <p class="text-xs mt-4" style="color:var(--mute)">Demo logins (password Energize@123): ravi@ (employee), manager@, finance@, admin@energizenow.com</p></form></div></div>`;
+  $('#lf').onsubmit=async e=>{e.preventDefault();try{const d=await api('/login',{method:'POST',body:fd(e.target)});T=d.token;U=d.user;localStorage.t=T;localStorage.u=JSON.stringify(U);page='dashboard';render()}catch{}}}
+
+async function checkBell(){const n=await api('/notifications');$('#dot')?.classList.toggle('hidden',!n.some(x=>!x.is_read))}
+async function bell(){const l=$('#nlist');l.classList.toggle('hidden');if(l.classList.contains('hidden'))return;
+  const n=await api('/notifications');l.innerHTML=n.length?n.map(x=>`<div class="py-2 border-b text-sm ${x.is_read?'':'font-semibold'}">${x.message}</div>`).join(''):empty('No notifications yet');
+  await api('/notifications/read',{method:'POST'});$('#dot').classList.add('hidden')}
+
+async function dashboard(){
+  const d=await api('/dashboard'),n=s=>d.status.find(x=>x.status===s),pend=['submitted','manager_approved'].reduce((a,s)=>a+(n(s)?.n||0),0);
+  const kpi=(l,v,s)=>`<div class="card"><div class="text-sm" style="color:var(--mute)">${l}</div><div class="text-3xl font-extrabold mt-1">${v}</div></div>`;
+  $('#view').innerHTML=`<h2 class="text-2xl font-extrabold mb-5">Dashboard</h2>
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-5">${kpi('Total spent',fmt(d.total))}${kpi('Waiting for approval',pend)}${kpi('Approved, unpaid',fmt(n('approved')?.amt))}${kpi('Policy flags',d.flagged)}</div>
+  <div class="grid lg:grid-cols-2 gap-4"><div class="card"><b>Spend by category</b><canvas id="c1" class="mt-3" height="220"></canvas></div>
+  <div class="card"><b>Spend by month</b><canvas id="c2" class="mt-3" height="220"></canvas></div></div>`;
+  const P=['#0f9d58','#f5a623','#3b82f6','#ef4444','#8b5cf6','#14b8a6'];
+  if(d.byCategory.length)charts.push(new Chart($('#c1'),{type:'doughnut',data:{labels:d.byCategory.map(x=>x.name),datasets:[{data:d.byCategory.map(x=>+x.value),backgroundColor:P}]}}));
+  if(d.byMonth.length)charts.push(new Chart($('#c2'),{type:'bar',data:{labels:d.byMonth.map(x=>x.m),datasets:[{data:d.byMonth.map(x=>+x.value),backgroundColor:'#0f9d58',borderRadius:6}]},options:{plugins:{legend:{display:false}}}}))}
+
+async function expenses(){
+  const [list,cats]=await Promise.all([api('/expenses'),api('/categories')]);
+  $('#view').innerHTML=`<h2 class="text-2xl font-extrabold mb-5">Expenses</h2><div class="grid lg:grid-cols-3 gap-4">
+  <form id="ef" class="card space-y-3 h-fit"><b>Add expense</b>
+    <input class="in" type="date" name="expense_date" value="${new Date().toISOString().slice(0,10)}" required>
+    <input class="in" name="merchant" placeholder="Merchant" required>
+    <select class="in" name="category_id" required><option value="">Category</option>${cats.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}</select>
+    <input class="in" type="number" step="0.01" min="0" name="amount" placeholder="Amount (₹)" required>
+    <select class="in" name="payment_mode"><option value="card">Card</option><option value="cash">Cash</option><option value="upi">UPI</option><option value="bank">Bank</option></select>
+    <textarea class="in" name="description" placeholder="Note (optional)"></textarea>
+    <label class="block text-sm" style="color:var(--mute)">Receipt<input class="in mt-1" type="file" name="receipt" accept="image/*,.pdf"></label>
+    <button class="btn w-full">Save expense</button></form>
+  <div class="card lg:col-span-2 overflow-x-auto"><b>My expenses</b><table class="w-full mt-2"><thead><tr><th>Date</th><th>Merchant</th><th>Category</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>
+  ${list.map(e=>`<tr><td>${String(e.expense_date).slice(0,10)}</td><td>${e.merchant||''}${e.receipt_path?` <a class="text-xs underline" href="/uploads/${e.receipt_path}" target="_blank">receipt</a>`:''}</td><td>${e.category}</td><td>${fmt(e.amount)}</td>
+  <td>${e.policy_flag?'<span class="pill bg-red-100 text-red-700">Over limit / no receipt</span>':'<span class="pill bg-emerald-100 text-emerald-700">Within policy</span>'}</td>
+  <td>${e.report_id?'<span class="text-xs" style="color:var(--mute)">In report</span>':`<button class="btn2" onclick="delExp(${e.id})">Delete</button>`}</td></tr>`).join('')}</tbody></table>${list.length?'':empty('No expenses yet. Add your first one on the left.')}</div></div>`;
+  $('#ef').onsubmit=async e=>{e.preventDefault();const r=await api('/expenses',{method:'POST',body:new FormData(e.target)});if(r.policy_flag)alert('Saved. This expense is flagged: it is over the category limit or has no receipt.');expenses()}}
+async function delExp(id){if(confirm('Delete this expense?')){await api('/expenses/'+id,{method:'DELETE'});expenses()}}
+
+async function reports(){
+  const [list,ex]=await Promise.all([api('/reports'),api('/expenses')]),free=ex.filter(e=>!e.report_id);
+  $('#view').innerHTML=`<h2 class="text-2xl font-extrabold mb-5">Reports</h2><div class="grid lg:grid-cols-3 gap-4">
+  <form id="rf" class="card space-y-3 h-fit"><b>Create report</b>
+    <input class="in" name="title" placeholder="Report title, e.g. Chennai site visit" required><input class="in" name="purpose" placeholder="Purpose">
+    <div class="max-h-52 overflow-auto text-sm">${free.map(e=>`<label class="flex gap-2 py-1"><input type="checkbox" value="${e.id}"> ${e.merchant||e.category} · ${fmt(e.amount)}</label>`).join('')||empty('Add expenses first.')}</div>
+    <button class="btn w-full">Create report</button></form>
+  <div class="lg:col-span-2 space-y-4"><div class="card overflow-x-auto"><b>My reports</b><table class="w-full mt-2"><thead><tr><th>#</th><th>Title</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>
+  ${list.map(r=>`<tr><td>${r.id}</td><td>${r.title}</td><td>${fmt(r.total_amount)}</td><td>${pill(r.status)}</td><td class="whitespace-nowrap"><button class="btn2" onclick="detail(${r.id})">View</button> ${['draft','rejected'].includes(r.status)?`<button class="btn" onclick="submitRep(${r.id})">Submit</button>`:''}</td></tr>`).join('')}</tbody></table>${list.length?'':empty('No reports yet.')}</div><div id="detail"></div></div></div>`;
+  $('#rf').onsubmit=async e=>{e.preventDefault();const f=fd(e.target);f.expense_ids=[...e.target.querySelectorAll('input[type=checkbox]:checked')].map(c=>+c.value);await api('/reports',{method:'POST',body:f});reports()}}
+async function submitRep(id){await api(`/reports/${id}/submit`,{method:'POST'});reports()}
+async function detail(id){const r=await api('/reports/'+id);$('#detail').innerHTML=`<div class="card"><b>${r.title}</b> ${pill(r.status)}<div class="text-sm mb-2" style="color:var(--mute)">${r.employee} · ${fmt(r.total_amount)} · ${r.purpose||''}</div>
+  <table class="w-full"><tbody>${r.expenses.map(e=>`<tr><td>${String(e.expense_date).slice(0,10)}</td><td>${e.merchant||''}</td><td>${e.category}</td><td>${fmt(e.amount)}</td></tr>`).join('')}</tbody></table>
+  <div class="mt-3 text-sm"><b>Approval history</b>${r.approvals.map(a=>`<div class="py-1">${a.approver}: ${a.decision}${a.comment?' – '+a.comment:''}</div>`).join('')||'<div style="color:var(--mute)">No decisions yet</div>'}</div></div>`;$('#detail').scrollIntoView({behavior:'smooth'})}
+
+async function approvals(){
+  const list=await api('/approvals');
+  $('#view').innerHTML=`<h2 class="text-2xl font-extrabold mb-5">Approvals${U.role==='manager'?'':' & payments'}</h2><div class="card overflow-x-auto"><table class="w-full"><thead><tr><th>#</th><th>Employee</th><th>Title</th><th>Total</th><th>Status</th><th></th></tr></thead><tbody>
+  ${list.map(r=>`<tr><td>${r.id}</td><td>${r.employee}</td><td>${r.title}</td><td>${fmt(r.total_amount)}</td><td>${pill(r.status)}</td><td class="whitespace-nowrap"><button class="btn2" onclick="detail(${r.id})">View</button>
+  ${r.status==='approved'?`<button class="btn" onclick="pay(${r.id})">Mark as paid</button>`:`<button class="btn" onclick="decide(${r.id},'approved')">Approve</button> <button class="btn2" onclick="decide(${r.id},'rejected')">Reject</button>`}</td></tr>`).join('')}</tbody></table>${list.length?'':empty('Nothing is waiting for you.')}</div><div id="detail" class="mt-4"></div>`}
+async function decide(id,d){const c=prompt(d==='rejected'?'Reason for rejecting:':'Comment (optional):')||'';if(d==='rejected'&&!c)return;await api('/approvals/'+id,{method:'POST',body:{decision:d,comment:c}});approvals()}
+async function pay(id){const ref=prompt('Payment reference (e.g. UTR number):');if(ref===null)return;await api('/reimburse/'+id,{method:'POST',body:{reference:ref}});approvals()}
+
+async function admin(){
+  const [us,cats]=await Promise.all([api('/users'),api('/categories')]);
+  $('#view').innerHTML=`<h2 class="text-2xl font-extrabold mb-5">Admin</h2><div class="grid lg:grid-cols-2 gap-4">
+  <div class="card overflow-x-auto"><b>Users</b><table class="w-full mt-2"><thead><tr><th>Code</th><th>Name</th><th>Role</th><th>Manager</th></tr></thead><tbody>${us.map(u=>`<tr><td>${u.employee_code}</td><td>${u.name}<div class="text-xs" style="color:var(--mute)">${u.email}</div></td><td>${u.role}</td><td>${u.manager||'-'}</td></tr>`).join('')}</tbody></table></div>
+  <div class="space-y-4"><form id="uf" class="card grid grid-cols-2 gap-2"><b class="col-span-2">Add user</b><input class="in" name="employee_code" placeholder="Code" required><input class="in" name="name" placeholder="Name" required><input class="in" name="email" placeholder="Email" required><input class="in" name="password" placeholder="Password" required>
+    <select class="in" name="role"><option>employee</option><option>manager</option><option>finance</option><option>admin</option></select>
+    <select class="in" name="manager_id"><option value="">No manager</option>${us.filter(u=>u.role==='manager').map(u=>`<option value="${u.id}">${u.name}</option>`).join('')}</select><button class="btn col-span-2">Add user</button></form>
+  <form id="cf" class="card"><b>Categories</b><div class="text-sm my-2">${cats.map(c=>`${c.name} (limit ${fmt(c.daily_limit)})`).join(' · ')}</div><div class="flex gap-2"><input class="in" name="name" placeholder="Name" required><input class="in" name="daily_limit" type="number" placeholder="Limit ₹"><button class="btn">Add</button></div></form></div></div>`;
+  $('#uf').onsubmit=async e=>{e.preventDefault();await api('/users',{method:'POST',body:fd(e.target)});admin()};
+  $('#cf').onsubmit=async e=>{e.preventDefault();await api('/categories',{method:'POST',body:fd(e.target)});admin()}}
+render();
+</script></body></html>
