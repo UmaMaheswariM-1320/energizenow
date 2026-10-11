@@ -7,6 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import 'dotenv/config';
 import { pool as db } from './db.js';
+import { ensureSchema } from './schema.js';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -123,12 +124,45 @@ app.post('/api/reimburse/:id', auth(['finance', 'admin']), wrap(async (req, res)
 
 // ---------- Dashboard, notifications ----------
 app.get('/api/dashboard', auth(), wrap(async (req, res) => {
-  const all = ['finance', 'admin'].includes(req.user.role);
-  res.json(await q(all ? 'SELECT * FROM expenses' : 'SELECT * FROM expenses WHERE user_id=?', all ? [] : [req.user.id]));
+  const all = ['finance', 'admin'].includes(req.user.role), p = all ? [] : [req.user.id];
+  const w = all ? '1=1' : 'e.user_id=?', w2 = all ? '1=1' : 'user_id=?';
+  const [t] = await q(`SELECT COALESCE(SUM(e.amount),0) total,COALESCE(SUM(e.policy_flag),0) flagged FROM expenses e WHERE ${w}`, p);
+  res.json({ ...t,
+    byCategory: await q(`SELECT c.name,SUM(e.amount) value FROM expenses e JOIN categories c ON c.id=e.category_id WHERE ${w} GROUP BY c.name`, p),
+    byMonth: await q(`SELECT DATE_FORMAT(e.expense_date,'%Y-%m') m,SUM(e.amount) value FROM expenses e WHERE ${w} GROUP BY m ORDER BY m`, p),
+    status: await q(`SELECT status,COUNT(*) n,SUM(total_amount) amt FROM reports WHERE ${w2} GROUP BY status`, p) });
 }));
 
-// ---------- Production Server Listening Logic ----------
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server successfully up and listening on port ${PORT}`);
-});
+app.get('/api/notifications', auth(), wrap(async (req, res) => res.json(await q('SELECT * FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 20', [req.user.id]))));
+app.post('/api/notifications/read', auth(), wrap(async (req, res) => { await q('UPDATE notifications SET is_read=1 WHERE user_id=?', [req.user.id]); res.json({ ok: 1 }); }));
+
+// ---------- Admin ----------
+app.get('/api/users', auth(['admin']), wrap(async (req, res) => res.json(await q('SELECT u.id,u.employee_code,u.name,u.email,u.role,m.name manager FROM users u LEFT JOIN users m ON m.id=u.manager_id ORDER BY u.id'))));
+app.post('/api/users', auth(['admin']), wrap(async (req, res) => {
+  const b = req.body;
+  await q('INSERT INTO users (employee_code,name,email,password_hash,role,department_id,manager_id) VALUES (?,?,?,?,?,1,?)',
+    [b.employee_code, b.name, b.email, await bcrypt.hash(b.password, 10), b.role, b.manager_id || null]);
+  res.json({ ok: 1 });
+}));
+app.post('/api/categories', auth(['admin']), wrap(async (req, res) => {
+  await q('INSERT INTO categories (name,daily_limit,receipt_required) VALUES (?,?,?)', [req.body.name, req.body.daily_limit || null, 1]);
+  res.json({ ok: 1 });
+}));
+
+// ---------- Create tables if missing, then first-run demo data ----------
+await ensureSchema();
+
+const [{ n }] = await q('SELECT COUNT(*) n FROM users');
+if (!n) {
+  const h = await bcrypt.hash('Energize@123', 10);
+  await q("INSERT INTO departments (name,monthly_budget) VALUES ('Operations',200000)");
+  await q("INSERT INTO categories (name,daily_limit,receipt_required) VALUES ('Travel',5000,1),('Meals',1500,1),('Fuel',3000,1),('Lodging',6000,1),('Office Supplies',2000,1)");
+  const add = async (code, name, email, role, mgr) => (await q('INSERT INTO users (employee_code,name,email,password_hash,role,department_id,manager_id) VALUES (?,?,?,?,?,1,?)', [code, name, email, h, role, mgr])).insertId;
+  await add('EN001', 'Admin User', 'admin@energizenow.com', 'admin', null);
+  await add('EN002', 'Fiona Finance', 'finance@energizenow.com', 'finance', null);
+  const m = await add('EN003', 'Meera Manager', 'manager@energizenow.com', 'manager', null);
+  await add('EN004', 'Ravi Employee', 'ravi@energizenow.com', 'employee', m);
+  console.log('Demo users created (password: Energize@123)');
+}
+
+app.listen(process.env.PORT, () => console.log(`EnergizeNow Expense running at http://localhost:${process.env.PORT}`));
